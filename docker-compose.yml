@@ -1,0 +1,55 @@
+
+# Define the services (containers) for your application
+services:
+  # Your authentication service
+  auth-service:
+    # Build the image from the Dockerfile in the current directory (.)
+    build: .
+    # Name the container (optional, but helpful)
+    container_name: auth_service_app
+    # Map port 8081 on your host to port 5051 inside this container
+    # (Adjust the internal port 5051 if your Flask app uses a different one, e.g., 5051)
+    ports:
+      - "8081:5051"
+    # Environment variables passed to the auth-service container
+    environment:
+      # IMPORTANT: Connection string for MongoDB.
+      # 'mongo' is the service name defined below. Docker Compose handles DNS.
+      # Replace 'mydatabase' with your desired database name.
+      MONGO_URI: mongodb://mongo:27017/mydatabase
+      # You might need other environment variables for Flask, e.g.:
+      # FLASK_APP: run.py
+      # FLASK_ENV: development # or production
+    # Make auth-service wait for the mongo service to be ready (basic check)
+    depends_on:
+      - mongo
+    # Link this service to the 'app-network' defined below
+    networks:
+      - app-network
+
+  # MongoDB database service
+  mongo:
+    # Use the official MongoDB image from Docker Hub
+    image: mongo:latest # Use a specific version if needed, e.g., mongo:6.0
+    # Name the container (optional)
+    container_name: mongo_db
+    # Expose MongoDB port (optional, mainly for internal communication)
+    # ports:
+    #  - "27017:27017" # Only uncomment if you need direct access from host
+    # Define a volume to persist database data
+    # This stores data in a Docker volume named 'mongo-data' on your host machine
+    volumes:
+      - mongo-data:/data/db
+    # Link this service to the 'app-network' defined below
+    networks:
+      - app-network
+
+# Define the network for services to communicate
+networks:
+  app-network:
+    driver: bridge # Default network driver
+
+# Define the volume for MongoDB data persistence
+volumes:
+  mongo-data:
+    driver: local # Default volume driver
