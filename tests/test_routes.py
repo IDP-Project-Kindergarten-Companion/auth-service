@@ -205,7 +205,7 @@ def test_change_password_success(client, mocker):
     assert response.get_json()["message"] == "Password updated successfully"
     # Assert calls on stored mocks
     mock_find_user.assert_called_once_with(user_id)
-    mock_verify_pw.assert_called_once_with("old_password_plain", "old_hashed_password") # Corrected assertion
+    mock_verify_pw.assert_called_once_with("old_password_plain", "old_hashed_password")
     mock_hash_pw.assert_called_once_with("new_password_plain")
     mock_update_pw.assert_called_once_with(user_id, "new_hashed_password")
 
@@ -278,7 +278,7 @@ def test_get_me_success(client, mocker):
     assert response_data["username"] == "me_user"
     # ... check other fields ...
     # Assert call on stored mock
-    mock_find_user.assert_called_once_with(user_id) # Corrected assertion
+    mock_find_user.assert_called_once_with(user_id)
 
 def test_get_me_no_token(client):
     """Test accessing /me without a token."""

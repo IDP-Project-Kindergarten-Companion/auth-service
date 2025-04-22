@@ -15,4 +15,4 @@ class Config:
     JWT_ALGORITHM = "HS256"
 
     JWT_ACCESS_TOKEN_EXPIRES = datetime.timedelta(minutes=15)
-    JWT_REFRESH_TOKEN_EXPIRES = datetime.timedelta(days=7)    
+    JWT_REFRESH_TOKEN_EXPIRES = datetime.timedelta(days=7)
