@@ -2,7 +2,7 @@
 from flask import Flask
 from .config import Config
 from .routes import auth_bp
-from .models import close_db # Import close_db to register it
+from .models import close_db
 
 def create_app():
     """Factory function to create the Flask application."""
@@ -10,7 +10,7 @@ def create_app():
     app.config.from_object(Config)
 
     # Register blueprints
-    app.register_blueprint(auth_bp, url_prefix='/auth') # All routes will be under /auth
+    app.register_blueprint(auth_bp, url_prefix='/auth')
 
     # Register database teardown function
     app.teardown_appcontext(close_db)

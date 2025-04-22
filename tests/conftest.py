@@ -6,12 +6,9 @@ from auth_service import create_app
 def app():
     """Create and configure a new app instance for each test module."""
     # Create app with testing configuration
-    # You might want a specific test config class in config.py later
-    app = create_app() # Assumes create_app handles config loading
+    app = create_app()
     app.config.update({
         "TESTING": True,
-        # "MONGO_URI": "mongodb://localhost:27017/authdb",
-        # "JWT_SECRET_KEY": "thisisajwtsecretkey"
     })
 
     yield app

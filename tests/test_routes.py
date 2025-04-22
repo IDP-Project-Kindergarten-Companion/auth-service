@@ -1,11 +1,6 @@
-# tests/test_routes.py
-import json
-import jwt # Need jwt for mocking decode exceptions
-import datetime
-from unittest.mock import MagicMock, ANY # Import ANY for flexible argument matching
+import jwt
 
 # Note: We assume utils.hash_password works correctly for these tests.
-# You could write separate unit tests just for utils.py functions.
 
 # --- Test Registration ---
 

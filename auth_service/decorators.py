@@ -1,12 +1,8 @@
-# --- auth_service/decorators.py ---
 
-import os
 from functools import wraps
 from flask import request, jsonify, current_app, g
 import jwt
 
-# Import the (optional) denylist check function if implementing logout
-# from .models import is_token_denylisted
 
 def token_required(f):
     """

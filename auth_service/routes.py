@@ -1,12 +1,9 @@
-# --- auth_service/routes.py ---
-from flask import Blueprint, request, jsonify, g, current_app
-# Import new functions/decorators
-from .utils import hash_password, verify_password, create_access_token, create_refresh_token
-from .models import find_user_by_username, find_user_by_id, save_user, update_user_password
-# Import new decorator if created separately, or just use token_required
-from .decorators import token_required, refresh_token_required
+import re
 import traceback
-import re # Import regex for more robust email validation
+from flask import Blueprint, request, jsonify, g, current_app
+from .decorators import refresh_token_required, token_required
+from .models import find_user_by_id, find_user_by_username, save_user, update_user_password
+from .utils import create_access_token, create_refresh_token, hash_password, verify_password
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -52,7 +49,7 @@ def register():
         user_id = save_user(username, hashed, role, email, first_name.strip(), last_name.strip())
         # Consider sending verification email here
         return jsonify({"message": "User registered successfully. Please check email for verification.", "user_id": user_id}), 201
-    except ValueError as e: # Catches username/email exists errors from save_user
+    except ValueError as e:
         return jsonify({"message": str(e)}), 409
     except Exception as e:
         current_app.logger.error(f"Registration error: {e}\n{traceback.format_exc()}")
@@ -90,7 +87,7 @@ def login():
 
 
 @auth_bp.route('/refresh', methods=['POST'])
-@refresh_token_required # Use the new decorator to validate the refresh token
+@refresh_token_required
 def refresh():
     """Provides a new access token using a valid refresh token."""
     current_user_id = g.current_user_id
@@ -107,7 +104,7 @@ def refresh():
 
 
 @auth_bp.route('/change-password', methods=['POST'])
-@token_required # User must be logged in (valid access token)
+@token_required
 def change_password():
     """Allows a logged-in user to change their password."""
     user_id = g.current_user_id
@@ -149,9 +146,8 @@ def logout():
     return jsonify({"message": "Logout successful. Please discard tokens locally."}), 200
 
 
-# Update /me route to return names
 @auth_bp.route('/me', methods=['GET'])
-@token_required # Uses the updated decorator that checks for access token
+@token_required
 def get_current_user():
     """Returns info about the logged-in user."""
     user_id = getattr(g, 'current_user_id', None)

@@ -1,9 +1,9 @@
 # --- auth_service/utils.py ---
 import jwt
 import datetime
+import uuid
 from passlib.context import CryptContext
 from flask import current_app
-import uuid
 
 # Setup password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -51,7 +51,6 @@ def decode_jwt_token(token: str) -> dict | None:
         return None
 
 
-
 def create_access_token(user_id: str, role: str) -> str:
     """Creates a short-lived JWT access token."""
     secret_key = current_app.config['JWT_SECRET_KEY']
@@ -64,10 +63,7 @@ def create_access_token(user_id: str, role: str) -> str:
         "type": "access", # Custom claim to identify token type
         "exp": datetime.datetime.utcnow() + expires_delta,
         "iat": datetime.datetime.utcnow(), # Issued at time
-        "jti": str(uuid.uuid4()) # Unique Token Identifier (useful for denylisting)
-        # Optional standard claims:
-        # "iss": current_app.config.get('JWT_ISSUER'), # Issuer
-        # "aud": current_app.config.get('JWT_AUDIENCE') # Audience
+        "jti": str(uuid.uuid4())
     }
     encoded_jwt = jwt.encode(to_encode, secret_key, algorithm=algorithm)
     return encoded_jwt

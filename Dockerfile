@@ -51,7 +51,3 @@ ENV FLASK_APP=run.py
 # --host=0.0.0.0 makes it accessible outside the container
 # --port=5051 matches the EXPOSE directive
 CMD ["flask", "run", "--host=0.0.0.0", "--port=5051"]
-
-# --- Alternative CMD for simple development scripts ---
-# If it's just a script, not a web server:
-# CMD ["python", "run.py"]
