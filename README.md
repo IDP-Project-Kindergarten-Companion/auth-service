@@ -26,38 +26,38 @@ This Auth Service provides user authentication and authorization functionalities
 
 ## Endpoints
 
-### User Registration
+#### User Registration
 
 * `POST /auth/register`
 * **Parameters:** `username`, `password`, `role`, `email`, `first_name`, `last_name`
 * **Returns:** `message`, `user_id` (on success)
 
-### User Login
+#### User Login
 
 * `POST /auth/login`
 * **Parameters:** `username`, `password`
 * **Returns:** `access_token`, `refresh_token`, `user_id`, `role` (on success)
 
-### Token Refresh
+#### Token Refresh
 
 * `POST /auth/refresh`
 * **Parameters:** `refresh_token`
 * **Returns:** `access_token` (on success)
 
-### Change Password
+#### Change Password
 
 * `POST /auth/change-password`
 * **Headers**: `Authorization: Bearer <access_token>`
 * **Parameters:** `old_password`, `new_password`
 * **Returns:** `message` (on success)
 
-### Get Current User Info
+#### Get Current User Info
 
 * `GET /auth/me`
 *   **Headers**: `Authorization: Bearer <access_token>`
 * **Returns:** `message`, `user_id`, `role`, `username`, `email`, `first_name`, `last_name`
 
-### Logout
+#### Logout
 
 * `POST /auth/logout`
 * **Returns:** `message` (on success)
