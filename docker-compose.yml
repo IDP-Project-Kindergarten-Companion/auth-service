@@ -1,55 +1,59 @@
+# docker-compose.yml for auth-service
 
-# Define the services (containers) for your application
 services:
   # Your authentication service
   auth-service:
-    # Build the image from the Dockerfile in the current directory (.)
     build: .
-    # Name the container (optional, but helpful)
     container_name: auth_service_app
-    # Map port 8081 on your host to port 5051 inside this container
-    # (Adjust the internal port 5051 if your Flask app uses a different one, e.g., 5051)
     ports:
+      # Flask app runs on 5051 internally, mapped to 8081 on host
       - "8081:5051"
-    # Environment variables passed to the auth-service container
     environment:
-      # IMPORTANT: Connection string for MongoDB.
-      # 'mongo' is the service name defined below. Docker Compose handles DNS.
-      # Replace 'mydatabase' with your desired database name.
+      # Connection string points to the 'mongo' service name
       MONGO_URI: mongodb://mongo:27017/authdb
-      # You might need other environment variables for Flask, e.g.:
-      # FLASK_APP: run.py
-      # FLASK_ENV: development # or production
-    # Make auth-service wait for the mongo service to be ready (basic check)
+      FLASK_APP: run.py
+      FLASK_ENV: development # Change to production later
     depends_on:
       - mongo
-    # Link this service to the 'app-network' defined below
     networks:
       - app-network
+    # Add volumes if needed for development hot-reloading
+    # volumes:
+    #   - ./auth_service:/app/auth_service
+    #   - ./run.py:/app/run.py
 
-  # MongoDB database service
+  # MongoDB database service for Authentication
   mongo:
-    # Use the official MongoDB image from Docker Hub
-    image: mongo:latest # Use a specific version if needed, e.g., mongo:6.0
-    # Name the container (optional)
-    container_name: mongo_db
-    # Expose MongoDB port (optional, mainly for internal communication)
-    # ports:
-    #  - "27017:27017" # Only uncomment if you need direct access from host
-    # Define a volume to persist database data
-    # This stores data in a Docker volume named 'mongo-data' on your host machine
+    image: mongo:latest
+    container_name: auth_mongo_db # Renamed for clarity if running both compose files
     volumes:
       - mongo-data:/data/db
-    # Link this service to the 'app-network' defined below
+    networks:
+      - app-network
+    # No ports exposed to host unless needed for direct debugging
+
+  # Mongo Express for viewing the Authentication DB
+  mongo-express-auth: # Renamed service for clarity
+    image: mongo-express:latest
+    container_name: mongo_express_auth_ui
+    restart: always
+    ports:
+      # Expose Mongo Express on host port 8088
+      - "8088:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo # Points to the MongoDB service name above
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-admin} # Optional basic auth for Mongo Express itself
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-password}
+    depends_on:
+      - mongo # Wait for the database to be ready
     networks:
       - app-network
 
-# Define the network for services to communicate
 networks:
   app-network:
-    driver: bridge # Default network driver
+    driver: bridge
 
-# Define the volume for MongoDB data persistence
 volumes:
-  mongo-data:
-    driver: local # Default volume driver
+  mongo-data: # Volume for auth DB data
+    driver: local
