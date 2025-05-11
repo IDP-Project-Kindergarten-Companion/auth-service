@@ -52,10 +52,13 @@ jobs:
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Install yq
+      - name: Install yq (mikefarah/yq)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y yq
+          echo "Downloading mikefarah/yq..."
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+          echo "yq version:"
+          yq --version
 
       - name: Checkout Deployment Repository
         uses: actions/checkout@v4
@@ -71,9 +74,14 @@ jobs:
           
           echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}' for container '${{ env.K8S_CONTAINER_NAME }}'"
           
-          # Use yq to update the image for the specific container name
+          # Correct yq syntax for mikefarah/yq to update the image for the specific container name
           # This command finds the container with the matching name and sets its image.
-          yq e '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = "'${NEW_IMAGE_WITH_TAG}'"' -i "${DEPLOYMENT_FILE_FULL_PATH}"
+          # The expression is the first argument, then -i for in-place, then the file.
+          yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = strenv(NEW_IMAGE_WITH_TAG)' -i "${DEPLOYMENT_FILE_FULL_PATH}"
+          # Using strenv(NEW_IMAGE_WITH_TAG) ensures the value is treated as a string and properly quoted if needed.
+          # Make sure NEW_IMAGE_WITH_TAG is available as an environment variable to yq if using strenv,
+          # or quote it directly in the expression if not. For simplicity in GH Actions, direct quoting is often easier:
+          # yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = "'"${NEW_IMAGE_WITH_TAG}"'"' -i "${DEPLOYMENT_FILE_FULL_PATH}"
           
           echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content:"
           cat "${DEPLOYMENT_FILE_FULL_PATH}"
