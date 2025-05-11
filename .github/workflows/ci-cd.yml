@@ -67,7 +67,8 @@ jobs:
           token: ${{ secrets.PAT_FOR_DEPLOYMENT_REPO }} # GitHub PAT with repo scope
 
       - name: Update Kubernetes Deployment Manifest with new image tag using yq
-        env: 
+        # This step makes NEW_IMAGE_WITH_TAG available as an environment variable specifically for this 'run' block
+        env:
           NEW_IMAGE_WITH_TAG: ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
         run: |
           DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
@@ -78,7 +79,8 @@ jobs:
           
           echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}' for container '${{ env.K8S_CONTAINER_NAME }}'"
           
-          yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = strenv(NEW_IMAGE_WITH_TAG)' -i "${DEPLOYMENT_FILE_FULL_PATH}"
+          # Revised yq command to explicitly target the Deployment document
+          yq 'select(.kind == "Deployment") |= (.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image = strenv(NEW_IMAGE_WITH_TAG))' -i "${DEPLOYMENT_FILE_FULL_PATH}"
           
           echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content AFTER yq:"
           cat "${DEPLOYMENT_FILE_FULL_PATH}"
