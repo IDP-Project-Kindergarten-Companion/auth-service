@@ -1,0 +1,143 @@
+# In auth-service/.github/workflows/ci-cd.yml
+name: Auth Service CI/CD
+
+on:
+  push:
+    branches:
+      - main # Or your primary branch (e.g., master)
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy-auth-service:
+    runs-on: ubuntu-latest
+    env:
+      # Docker and Image Configuration
+      DOCKER_IMAGE_NAME: mariuspreda/auth-service # Your Docker Hub image name
+      
+      # Kubernetes Configuration
+      K8S_NAMESPACE: kindergarten-app
+      K8S_DEPLOYMENT_NAME: auth-service-deployment # From your auth-service-k8s.yaml
+      
+      # Deployment Repository Configuration
+      DEPLOYMENT_REPO_OWNER_SLASH_NAME: IDP-Project-Kindergarten-Companion/deployment
+      # Path to the K8s deployment YAML for this service WITHIN the 'deployment' repository
+      K8S_MANIFEST_PATH_IN_DEPLOY_REPO: k8s/core-services/auth/auth-service-k8s.yaml
+
+    steps:
+      - name: Checkout auth-service source code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Build from the root of the auth-service repo
+          file: ./Dockerfile # Path to your Dockerfile in auth-service repo
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE_NAME }}:latest
+            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} # Tag with commit SHA for precise versioning
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Set up Kubectl
+        uses: azure/setup-kubectl@v4 
+        # Kubectl version will be latest by default, or specify with:
+        # with:
+        #   version: 'v1.28.2' 
+
+      - name: Configure Kubectl (Kubeconfig)
+        run: |
+          mkdir -p ${HOME}/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ${HOME}/.kube/config
+          chmod 600 ${HOME}/.kube/config
+          echo "Kubeconfig configured for kubectl."
+          kubectl version --client
+          kubectl cluster-info # Useful for verifying connection
+
+      - name: Ensure Kubernetes Namespace Exists
+        run: |
+          echo "Ensuring namespace '${{ env.K8S_NAMESPACE }}' exists..."
+          kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          echo "Namespace '${{ env.K8S_NAMESPACE }}' ensured."
+
+      - name: Create or Update Kubernetes App Secrets
+        run: |
+          echo "Creating/Updating Kubernetes secret 'app-secrets' in namespace '${{ env.K8S_NAMESPACE }}'..."
+          kubectl create secret generic app-secrets \
+            --from-literal=JWT_SECRET_KEY='${{ secrets.APP_JWT_SECRET_KEY }}' \
+            --from-literal=FLASK_SECRET_KEY='${{ secrets.APP_FLASK_SECRET_KEY }}' \
+            --namespace=${{ env.K8S_NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "Kubernetes secret 'app-secrets' created/updated successfully."
+
+      - name: Checkout Deployment Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}
+          path: deployment-repo # Checkout to a specific path to avoid conflicts
+          token: ${{ secrets.PAT_FOR_DEPLOYMENT_REPO }} # PAT with repo scope for the deployment repo
+
+      - name: Update Kubernetes Deployment with new image tag
+        run: |
+          DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
+          NEW_IMAGE_TAG="${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}"
+          
+          echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_TAG}'"
+          
+          # Using sed to update the image tag. Ensure this is robust for your YAML structure.
+          # This targets 'image: mariuspreda/auth-service:*' and replaces it.
+          # It assumes 'auth-service-container' is the name of your container in the deployment.
+          sed -i.bak -E "s|(\s*-\s*name:\s*auth-service-container\s*.*?image:\s*)${{ env.DOCKER_IMAGE_NAME }}:.*|\1${NEW_IMAGE_TAG}|" "${DEPLOYMENT_FILE_FULL_PATH}"
+          
+          # Alternative using yq (more robust for YAML, requires yq to be available on runner)
+          # Ensure yq is installed: e.g., add a step: `sudo apt-get update && sudo apt-get install -y yq`
+          # yq e '(.spec.template.spec.containers[] | select(.name == "auth-service-container").image) = "'${NEW_IMAGE_TAG}'"' -i "${DEPLOYMENT_FILE_FULL_PATH}"
+
+          echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content:"
+          cat "${DEPLOYMENT_FILE_FULL_PATH}"
+
+      - name: Apply Kubernetes Manifests from Deployment Repo
+        run: |
+          DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
+          echo "Applying updated Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' for auth-service..."
+          kubectl apply -f "${DEPLOYMENT_FILE_FULL_PATH}" --namespace=${{ env.K8S_NAMESPACE }}
+          
+          echo "Waiting for deployment rollout of '${{ env.K8S_DEPLOYMENT_NAME }}' to complete..."
+          kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT_NAME }} --namespace=${{ env.K8S_NAMESPACE }} --timeout=120s
+          echo "Deployment rollout for '${{ env.K8S_DEPLOYMENT_NAME }}' complete."
+
+      - name: Commit and Push K8s YAML changes to Deployment Repo (Optional GitOps Step)
+        # This step makes your 'deployment' repository the source of truth for deployed versions.
+        # If you prefer a different GitOps tool (like ArgoCD or Flux) to watch the deployment repo,
+        # you might not need the direct push from here, but just the commit.
+        if: success() # Only run if previous steps were successful
+        run: |
+          DEPLOYMENT_FILE_FULL_PATH_RELATIVE_TO_DEPLOY_REPO="${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
+          cd deployment-repo
+          
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions-bot@github.com"
+          
+          # Check if there are changes to the specific file to commit
+          if ! git diff --quiet "${DEPLOYMENT_FILE_FULL_PATH_RELATIVE_TO_DEPLOY_REPO}"; then
+            echo "Changes detected in '${DEPLOYMENT_FILE_FULL_PATH_RELATIVE_TO_DEPLOY_REPO}'. Committing..."
+            git add "${DEPLOYMENT_FILE_FULL_PATH_RELATIVE_TO_DEPLOY_REPO}"
+            git commit -m "Update ${{ env.K8S_DEPLOYMENT_NAME }} image to ${{ github.sha }} via auth-service CI"
+            # Use the PAT for pushing
+            git push https://${{ secrets.PAT_FOR_DEPLOYMENT_REPO }}@github.com/${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}.git HEAD:main
+            echo "Pushed updated K8s YAML to deployment repository."
+          else
+            echo "No changes to K8s YAML ('${DEPLOYMENT_FILE_FULL_PATH_RELATIVE_TO_DEPLOY_REPO}') to commit."
+          fi
