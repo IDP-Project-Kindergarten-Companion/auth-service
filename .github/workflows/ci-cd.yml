@@ -14,6 +14,10 @@ jobs:
       # Docker and Image Configuration
       DOCKER_IMAGE_NAME: mariuspreda/auth-service
       
+      # Kubernetes Configuration
+      K8S_NAMESPACE: kindergarten-app 
+      # K8S_DEPLOYMENT_NAME: auth-service-deployment # Not strictly needed by this revised workflow but good for context
+      
       # Deployment Repository Configuration
       DEPLOYMENT_REPO_OWNER_SLASH_NAME: IDP-Project-Kindergarten-Companion/deployment
       # Path to the K8s deployment YAML for this service WITHIN the 'deployment' repository
@@ -43,10 +47,15 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} # Tag with commit SHA
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Install yq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yq
 
       - name: Checkout Deployment Repository
         uses: actions/checkout@v4
@@ -55,39 +64,57 @@ jobs:
           path: deployment-repo # Checkout to a specific path
           token: ${{ secrets.PAT_FOR_DEPLOYMENT_REPO }} # GitHub PAT with repo scope
 
-      - name: Update Kubernetes Deployment Manifest with new image tag
+      - name: Update Kubernetes Deployment Manifest with new image tag using yq
         run: |
           DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
           NEW_IMAGE_WITH_TAG="${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}"
           
-          echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}'"
+          echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}' for container '${{ env.K8S_CONTAINER_NAME }}'"
           
-          # Using sed to update the image tag. 
-          # This sed command targets the image line for the specified container name.
-          # Adjust K8S_CONTAINER_NAME if your container name in the YAML is different.
-          sed -i.bak -E "s|(\s*-\s*name:\s*${K8S_CONTAINER_NAME}\s*.*?image:\s*)${{ env.DOCKER_IMAGE_NAME }}:.*|\1${NEW_IMAGE_WITH_TAG}|" "${DEPLOYMENT_FILE_FULL_PATH}"
+          # Use yq to update the image for the specific container name
+          # This command finds the container with the matching name and sets its image.
+          yq e '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = "'${NEW_IMAGE_WITH_TAG}'"' -i "${DEPLOYMENT_FILE_FULL_PATH}"
           
-          # Verify the change (optional, good for debugging)
-          echo "Updated manifest content:"
+          echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content:"
           cat "${DEPLOYMENT_FILE_FULL_PATH}"
 
       - name: Commit and Push K8s YAML changes to Deployment Repo
+        if: success() # Only run if previous steps were successful
+        env:
+          GIT_COMMITTER_NAME: "GitHub Actions Bot"
+          GIT_COMMITTER_EMAIL: "actions-bot@github.com"
+          GIT_AUTHOR_NAME: "GitHub Actions Bot"
+          GIT_AUTHOR_EMAIL: "actions-bot@github.com"
         run: |
-          cd deployment-repo
+          TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH="${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
           
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions-bot@github.com"
+          cd deployment-repo # Change directory into the checked-out deployment repository
           
-          # Check if there are changes to the specific file to commit
-          if ! git diff --quiet "${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"; then
-            echo "Changes detected in '${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}'. Committing..."
-            git add "${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
+          echo "--- Debugging Push Step ---"
+          echo "Current directory: $(pwd)"
+          echo "Git remote -v:"
+          git remote -v
+          echo "Git status before add for '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}':"
+          git status -s "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}" 
+
+          # Check if the specific file was modified and has changes compared to HEAD
+          if git diff --quiet HEAD -- "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"; then
+            echo "File '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}' has NO effective changes compared to HEAD of deployment repo. Nothing to commit."
+          else
+            echo "File '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}' has changes. Proceeding with commit and push."
+            git add "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"
+            
+            echo "Git status after add for '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}':"
+            git status -s "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"
+
+            echo "Attempting to commit..."
             git commit -m "Update auth-service image to ${{ github.sha }} in K8s manifest
 
             Triggered by commit ${{ github.sha }} in ${{ github.repository }}"
-            # Use the PAT for pushing
-            git push https://${{ secrets.PAT_FOR_DEPLOYMENT_REPO }}@github.com/${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}.git HEAD:main
-            echo "Pushed updated K8s YAML to deployment repository."
-          else
-            echo "No changes to K8s YAML ('${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}') to commit."
+            
+            echo "Attempting to push to remote main branch of ${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}..."
+            # Using x-access-token for PAT authentication with git push over HTTPS
+            git push https://x-access-token:${{ secrets.PAT_FOR_DEPLOYMENT_REPO }}@github.com/${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}.git HEAD:main
+            echo "Push command executed. Check GitHub UI for commit in deployment repository."
           fi
+          echo "--- End Debugging Push Step ---"
