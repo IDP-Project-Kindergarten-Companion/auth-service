@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main # Or your primary branch
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual triggering from the Actions tab
 
 jobs:
   build-and-update-manifest:
@@ -14,9 +14,8 @@ jobs:
       # Docker and Image Configuration
       DOCKER_IMAGE_NAME: mariuspreda/auth-service
       
-      # Kubernetes Configuration
+      # Kubernetes Configuration (mostly for context, as deployment is manual)
       K8S_NAMESPACE: kindergarten-app 
-      # K8S_DEPLOYMENT_NAME: auth-service-deployment # Not strictly needed by this revised workflow but good for context
       
       # Deployment Repository Configuration
       DEPLOYMENT_REPO_OWNER_SLASH_NAME: IDP-Project-Kindergarten-Companion/deployment
@@ -47,7 +46,7 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} # Tag with commit SHA
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -68,27 +67,25 @@ jobs:
           token: ${{ secrets.PAT_FOR_DEPLOYMENT_REPO }} # GitHub PAT with repo scope
 
       - name: Update Kubernetes Deployment Manifest with new image tag using yq
+        # This step makes NEW_IMAGE_WITH_TAG available as an environment variable specifically for this 'run' block
+        env:
+          NEW_IMAGE_WITH_TAG: ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
         run: |
           DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
-          NEW_IMAGE_WITH_TAG="${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}"
           
           echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}' for container '${{ env.K8S_CONTAINER_NAME }}'"
           
           # Correct yq syntax for mikefarah/yq to update the image for the specific container name
-          # This command finds the container with the matching name and sets its image.
-          # The expression is the first argument, then -i for in-place, then the file.
+          # The yq expression is the first argument, then -i for in-place edit, then the file.
+          # strenv(NEW_IMAGE_WITH_TAG) reads the value from the NEW_IMAGE_WITH_TAG environment variable.
           yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = strenv(NEW_IMAGE_WITH_TAG)' -i "${DEPLOYMENT_FILE_FULL_PATH}"
-          # Using strenv(NEW_IMAGE_WITH_TAG) ensures the value is treated as a string and properly quoted if needed.
-          # Make sure NEW_IMAGE_WITH_TAG is available as an environment variable to yq if using strenv,
-          # or quote it directly in the expression if not. For simplicity in GH Actions, direct quoting is often easier:
-          # yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = "'"${NEW_IMAGE_WITH_TAG}"'"' -i "${DEPLOYMENT_FILE_FULL_PATH}"
           
           echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content:"
           cat "${DEPLOYMENT_FILE_FULL_PATH}"
 
       - name: Commit and Push K8s YAML changes to Deployment Repo
         if: success() # Only run if previous steps were successful
-        env:
+        env: # Set committer and author info for the git commit
           GIT_COMMITTER_NAME: "GitHub Actions Bot"
           GIT_COMMITTER_EMAIL: "actions-bot@github.com"
           GIT_AUTHOR_NAME: "GitHub Actions Bot"
@@ -105,7 +102,7 @@ jobs:
           echo "Git status before add for '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}':"
           git status -s "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}" 
 
-          # Check if the specific file was modified and has changes compared to HEAD
+          # Check if the specific file was modified and has changes compared to HEAD of the deployment repo's current branch
           if git diff --quiet HEAD -- "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"; then
             echo "File '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}' has NO effective changes compared to HEAD of deployment repo. Nothing to commit."
           else
