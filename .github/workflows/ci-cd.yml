@@ -1,28 +1,17 @@
 # In auth-service/.github/workflows/ci-cd.yml
-name: Auth Service CI (Build, Push, Update Manifest)
+name: Auth Service CI (Build & Push to Docker Hub)
 
 on:
   push:
     branches:
       - main # Or your primary branch
-  workflow_dispatch: # Allows manual triggering from the Actions tab
+  workflow_dispatch: # Allows manual triggering
 
 jobs:
-  build-and-update-manifest:
+  build-and-push:
     runs-on: ubuntu-latest
     env:
-      # Docker and Image Configuration
       DOCKER_IMAGE_NAME: mariuspreda/auth-service
-      
-      # Kubernetes Configuration (mostly for context, as deployment is manual)
-      K8S_NAMESPACE: kindergarten-app 
-      
-      # Deployment Repository Configuration
-      DEPLOYMENT_REPO_OWNER_SLASH_NAME: IDP-Project-Kindergarten-Companion/deployment
-      # Path to the K8s deployment YAML for this service WITHIN the 'deployment' repository
-      K8S_MANIFEST_PATH_IN_DEPLOY_REPO: k8s/core-services/auth/auth-service-k8s.yaml
-      # Name of the container within your K8s deployment manifest for this service
-      K8S_CONTAINER_NAME: auth-service-container 
 
     steps:
       - name: Checkout auth-service source code
@@ -46,95 +35,7 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} # Still good to push a SHA-tagged version for backup/reference
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
-
-      - name: Install yq (mikefarah/yq)
-        run: |
-          echo "Downloading mikefarah/yq..."
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-          echo "yq version:"
-          yq --version
-
-      - name: Checkout Deployment Repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}
-          path: deployment-repo # Checkout to a specific path
-          token: ${{ secrets.PAT_FOR_DEPLOYMENT_REPO }} # GitHub PAT with repo scope
-
-      - name: Update Kubernetes Deployment Manifest with new image tag using yq
-        env:
-          NEW_IMAGE_WITH_TAG: ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
-        run: |
-          DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
-          TEMP_DEPLOYMENT_FILE="${DEPLOYMENT_FILE_FULL_PATH}.tmp"
-          
-          echo "--- Content of ${DEPLOYMENT_FILE_FULL_PATH} BEFORE yq modification ---"
-          cat "${DEPLOYMENT_FILE_FULL_PATH}"
-          echo "--- End of content BEFORE yq modification ---"
-          
-          echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}' for container '${{ env.K8S_CONTAINER_NAME }}'"
-          
-          # Revised yq command: Directly assign to the path.
-          # This should process all documents and modify the image field where the path matches.
-          yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = strenv(NEW_IMAGE_WITH_TAG)' "${DEPLOYMENT_FILE_FULL_PATH}" > "${TEMP_DEPLOYMENT_FILE}"
-          
-          # Check if yq command succeeded and produced a non-empty output
-          if [ $? -ne 0 ]; then
-            echo "Error: yq command failed!"
-            exit 1
-          fi
-          if [ ! -s "${TEMP_DEPLOYMENT_FILE}" ]; then
-            echo "Error: yq produced an empty output file! Original file content was:"
-            cat "${DEPLOYMENT_FILE_FULL_PATH}" # Show original if yq blanked it
-            exit 1
-          fi
-          
-          # Replace original file with the temporary file
-          mv "${TEMP_DEPLOYMENT_FILE}" "${DEPLOYMENT_FILE_FULL_PATH}"
-          
-          echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content AFTER yq:"
-          cat "${DEPLOYMENT_FILE_FULL_PATH}"
-
-      - name: Commit and Push K8s YAML changes to Deployment Repo
-        if: success() # Only run if previous steps were successful
-        env: 
-          GIT_COMMITTER_NAME: "GitHub Actions Bot"
-          GIT_COMMITTER_EMAIL: "actions-bot@github.com"
-          GIT_AUTHOR_NAME: "GitHub Actions Bot"
-          GIT_AUTHOR_EMAIL: "actions-bot@github.com"
-        run: |
-          TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH="${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
-          
-          cd deployment-repo 
-          
-          echo "--- Debugging Push Step ---"
-          echo "Current directory: $(pwd)"
-          echo "Git remote -v:"
-          git remote -v
-          echo "Git status before add for '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}':"
-          git status -s "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}" 
-
-          if git diff --quiet HEAD -- "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"; then
-            echo "File '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}' has NO effective changes compared to HEAD of deployment repo. Nothing to commit."
-          else
-            echo "File '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}' has changes. Proceeding with commit and push."
-            git add "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"
-            
-            echo "Git status after add for '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}':"
-            git status -s "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"
-
-            echo "Attempting to commit..."
-            git commit -m "Update auth-service image to ${{ github.sha }} in K8s manifest
-
-            Triggered by commit ${{ github.sha }} in ${{ github.repository }}"
-            
-            echo "Attempting to push to remote main branch of ${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}..."
-            git push https://x-access-token:${{ secrets.PAT_FOR_DEPLOYMENT_REPO }}@github.com/${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}.git HEAD:main
-            echo "Push command executed. Check GitHub UI for commit in deployment repository."
-          fi
-          echo "--- End Debugging Push Step ---"
