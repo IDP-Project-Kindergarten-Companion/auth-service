@@ -67,11 +67,11 @@ jobs:
           token: ${{ secrets.PAT_FOR_DEPLOYMENT_REPO }} # GitHub PAT with repo scope
 
       - name: Update Kubernetes Deployment Manifest with new image tag using yq
-        # This step makes NEW_IMAGE_WITH_TAG available as an environment variable specifically for this 'run' block
         env:
           NEW_IMAGE_WITH_TAG: ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
         run: |
           DEPLOYMENT_FILE_FULL_PATH="deployment-repo/${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
+          TEMP_DEPLOYMENT_FILE="${DEPLOYMENT_FILE_FULL_PATH}.tmp"
           
           echo "--- Content of ${DEPLOYMENT_FILE_FULL_PATH} BEFORE yq modification ---"
           cat "${DEPLOYMENT_FILE_FULL_PATH}"
@@ -79,15 +79,30 @@ jobs:
           
           echo "Updating image in Kubernetes manifest '${DEPLOYMENT_FILE_FULL_PATH}' to '${NEW_IMAGE_WITH_TAG}' for container '${{ env.K8S_CONTAINER_NAME }}'"
           
-          # Revised yq command to explicitly target the Deployment document
-          yq 'select(.kind == "Deployment") |= (.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image = strenv(NEW_IMAGE_WITH_TAG))' -i "${DEPLOYMENT_FILE_FULL_PATH}"
+          # Revised yq command: Directly assign to the path.
+          # This should process all documents and modify the image field where the path matches.
+          yq '(.spec.template.spec.containers[] | select(.name == "${{ env.K8S_CONTAINER_NAME }}").image) = strenv(NEW_IMAGE_WITH_TAG)' "${DEPLOYMENT_FILE_FULL_PATH}" > "${TEMP_DEPLOYMENT_FILE}"
+          
+          # Check if yq command succeeded and produced a non-empty output
+          if [ $? -ne 0 ]; then
+            echo "Error: yq command failed!"
+            exit 1
+          fi
+          if [ ! -s "${TEMP_DEPLOYMENT_FILE}" ]; then
+            echo "Error: yq produced an empty output file! Original file content was:"
+            cat "${DEPLOYMENT_FILE_FULL_PATH}" # Show original if yq blanked it
+            exit 1
+          fi
+          
+          # Replace original file with the temporary file
+          mv "${TEMP_DEPLOYMENT_FILE}" "${DEPLOYMENT_FILE_FULL_PATH}"
           
           echo "Image tag updated in local checkout of '${DEPLOYMENT_FILE_FULL_PATH}'. Verifying content AFTER yq:"
           cat "${DEPLOYMENT_FILE_FULL_PATH}"
 
       - name: Commit and Push K8s YAML changes to Deployment Repo
         if: success() # Only run if previous steps were successful
-        env: # Set committer and author info for the git commit
+        env: 
           GIT_COMMITTER_NAME: "GitHub Actions Bot"
           GIT_COMMITTER_EMAIL: "actions-bot@github.com"
           GIT_AUTHOR_NAME: "GitHub Actions Bot"
@@ -95,7 +110,7 @@ jobs:
         run: |
           TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH="${{ env.K8S_MANIFEST_PATH_IN_DEPLOY_REPO }}"
           
-          cd deployment-repo # Change directory into the checked-out deployment repository
+          cd deployment-repo 
           
           echo "--- Debugging Push Step ---"
           echo "Current directory: $(pwd)"
@@ -104,7 +119,6 @@ jobs:
           echo "Git status before add for '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}':"
           git status -s "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}" 
 
-          # Check if the specific file was modified and has changes compared to HEAD of the deployment repo's current branch
           if git diff --quiet HEAD -- "${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}"; then
             echo "File '${TARGET_FILE_IN_DEPLOY_REPO_RELATIVE_PATH}' has NO effective changes compared to HEAD of deployment repo. Nothing to commit."
           else
@@ -120,7 +134,6 @@ jobs:
             Triggered by commit ${{ github.sha }} in ${{ github.repository }}"
             
             echo "Attempting to push to remote main branch of ${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}..."
-            # Using x-access-token for PAT authentication with git push over HTTPS
             git push https://x-access-token:${{ secrets.PAT_FOR_DEPLOYMENT_REPO }}@github.com/${{ env.DEPLOYMENT_REPO_OWNER_SLASH_NAME }}.git HEAD:main
             echo "Push command executed. Check GitHub UI for commit in deployment repository."
           fi
