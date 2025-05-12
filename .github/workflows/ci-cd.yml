@@ -1,5 +1,5 @@
 # In auth-service/.github/workflows/ci-cd.yml
-name: Auth Service CI (Build & Push Multi-Platform to Docker Hub)
+name: Auth Service CI/CD (Test, Build, Push)
 
 on:
   push:
@@ -8,8 +8,37 @@ on:
   workflow_dispatch: # Allows manual triggering
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run Unit Tests
+    steps:
+      - name: Checkout auth-service source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # If your tests have additional dependencies not in the main requirements.txt,
+          # you might have a separate requirements-dev.txt or requirements-test.txt
+          # pip install -r tests/requirements-test.txt # Example
+
+      - name: Run Pytest
+        run: |
+          pytest tests/ # Assumes your tests are in the 'tests' directory
+          # You can add options like:
+          # pytest tests/ -v --cov=auth_service --cov-report=xml
+          # if you want verbose output and code coverage reports.
+
   build-and-push:
     runs-on: ubuntu-latest
+    name: Build & Push Docker Image
+    needs: test # This job will only run if the 'test' job succeeds
     env:
       DOCKER_IMAGE_NAME: mariuspreda/auth-service
 
@@ -35,11 +64,11 @@ jobs:
         with:
           context: . # Build from the root of the auth-service repo
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64 
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} 
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
