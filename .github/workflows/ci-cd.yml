@@ -1,5 +1,5 @@
 # In auth-service/.github/workflows/ci-cd.yml
-name: Auth Service CI (Build & Push to Docker Hub)
+name: Auth Service CI (Build & Push Multi-Platform to Docker Hub)
 
 on:
   push:
@@ -17,6 +17,9 @@ jobs:
       - name: Checkout auth-service source code
         uses: actions/checkout@v4
 
+      - name: Set up QEMU (for multi-platform builds)
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -26,12 +29,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }} # Docker Hub PAT
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image (multi-platform)
         id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: . # Build from the root of the auth-service repo
           file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE_NAME }}:latest
